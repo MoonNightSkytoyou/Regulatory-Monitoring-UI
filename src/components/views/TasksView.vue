@@ -21,12 +21,10 @@ import {
   Download,
   Copy,
   Check,
-  Globe,
   X,
   Pin,
   UserPlus,
   UserCheck,
-  ArrowRight,
   ChevronDown,
   ChevronUp,
   Eye,
@@ -35,10 +33,10 @@ import {
 } from 'lucide-vue-next';
 import { useTaskStore, type ComplianceTask, type TaskQuestion } from '@/stores/taskStore';
 import { useDirectoryStore } from '@/stores/directoryStore';
-import TaskReportModal from '../modals/TaskReportModal.vue';
-import ComboboxFilter from '@/components/common/ComboboxFilter.vue';
-import PaginationController from '@/components/common/PaginationController.vue';
-import { ALL_JURISDICTIONS, type RegulatorInScope } from '@/types';
+import { ALL_JURISDICTIONS, type RegulatorInScope, type MatrixSessionState } from '@/types';
+import BatchQuestionModal from '../modals/BatchQuestionModal.vue';
+import ResearchMatrixWorkbench from './ResearchMatrixWorkbench.vue';
+import { createDynamicMatrixSession, initialMatrixSession1 } from '@/data/matrixMockData';
 
 const props = defineProps<{
   initialSelectedTaskId?: string | null;
@@ -84,8 +82,36 @@ const handleClearAllFilters = () => {
   selectedLinkages.value = [];
 };
 
-// Selected task for detail view
-const selectedTaskId = ref<string | null>(props.initialSelectedTaskId || null);
+// Selected task for detail view - defaults to initialSelectedTaskId or first task so questions are immediately visible
+const selectedTaskId = ref<string | null>(
+  props.initialSelectedTaskId || (taskStore.tasks.length > 0 ? taskStore.tasks[0].id : null)
+);
+
+watch(
+  () => props.initialSelectedTaskId,
+  (newVal) => {
+    if (newVal) {
+      selectedTaskId.value = newVal;
+      isMatrixMode.value = false;
+      activeMatrixSession.value = null;
+    }
+  }
+);
+
+// Batch Questions Modal state
+const isBatchModalOpen = ref(false);
+
+// Matrix Workbench Mode State (viewing matrix for a question/task)
+const isMatrixMode = ref(false);
+const activeMatrixSession = ref<MatrixSessionState | null>(null);
+
+// Table Display View Mode: Flat Table vs Collapsible Batch Grouping
+const isBatchGroupedView = ref(false);
+const expandedBatches = ref<Record<string, boolean>>({});
+
+const toggleBatchCollapse = (batchLabel: string) => {
+  expandedBatches.value[batchLabel] = !expandedBatches.value[batchLabel];
+};
 
 // Report Modal
 const isReportModalOpen = ref(false);
@@ -96,6 +122,103 @@ const activeCitation = ref<{ pin: string; sourceTitle: string; url: string; exce
 const currentTask = computed<ComplianceTask | null>(() => {
   if (!selectedTaskId.value) return null;
   return taskStore.tasks.find((t) => t.id === selectedTaskId.value) || null;
+});
+
+interface AggregatedTaskSource {
+  title: string;
+  authority: string;
+  jurisdiction: string;
+  url: string;
+  publishDate?: string;
+  rationale?: string;
+  excerpt?: string;
+  count: number;
+}
+
+const taskAggregatedSources = computed<AggregatedTaskSource[]>(() => {
+  if (!currentTask.value || !currentTask.value.questions) return [];
+  const map = new Map<string, AggregatedTaskSource>();
+
+  currentTask.value.questions.forEach((q) => {
+    if (q.retrievedUrls && q.retrievedUrls.length > 0) {
+      q.retrievedUrls.forEach((u) => {
+        const key = u.title.trim().toLowerCase();
+        if (map.has(key)) {
+          map.get(key)!.count++;
+        } else {
+          map.set(key, {
+            title: u.title,
+            authority: u.authority,
+            jurisdiction: u.jurisdiction,
+            url: u.url,
+            publishDate: u.publishDate,
+            rationale: u.rationale,
+            excerpt: u.excerpt,
+            count: 1,
+          });
+        }
+      });
+    }
+  });
+
+  return Array.from(map.values());
+});
+
+const taskAggregatedRegulators = computed(() => {
+  const authorities = new Set<string>();
+  taskAggregatedSources.value.forEach((s) => {
+    if (s.authority) authorities.add(s.authority);
+  });
+  return Array.from(authorities);
+});
+
+// Deduplicated regulatory authorities with detailed names & jurisdictions (主管機關)
+const taskDeduplicatedRegulatorsDetail = computed(() => {
+  const map = new Map<string, { acronym: string; name: string; jurisdiction: string; id?: string }>();
+
+  taskAggregatedSources.value.forEach((s) => {
+    const acronym = (s.authority || '').trim();
+    if (acronym && !map.has(acronym.toUpperCase())) {
+      const matched = props.regulators?.find(
+        (r) => r.acronym?.toUpperCase() === acronym.toUpperCase() || r.name?.toUpperCase() === acronym.toUpperCase()
+      );
+      map.set(acronym.toUpperCase(), {
+        acronym: acronym,
+        name: matched?.name || (acronym.length > 5 ? acronym : `${acronym} Regulatory Authority`),
+        jurisdiction: matched?.jurisdiction || s.jurisdiction || 'Global',
+        id: matched?.id || `reg-${acronym.toLowerCase()}`,
+      });
+    }
+  });
+
+  if (currentTask.value?.linkedRegulatorIds) {
+    currentTask.value.linkedRegulatorIds.forEach((regId) => {
+      const norm = regId.replace('reg-', '').toUpperCase();
+      if (norm && !map.has(norm)) {
+        const matched = props.regulators?.find((r) => r.id === regId || r.acronym?.toUpperCase() === norm);
+        map.set(norm, {
+          acronym: matched?.acronym || norm,
+          name: matched?.name || `${norm} Regulatory Authority`,
+          jurisdiction: matched?.jurisdiction || 'Global',
+          id: matched?.id || regId,
+        });
+      }
+    });
+  }
+
+  return Array.from(map.values());
+});
+
+const taskAggregatedJurisdictions = computed(() => {
+  const jurSet = new Set<string>();
+  taskAggregatedSources.value.forEach((s) => {
+    if (s.jurisdiction) jurSet.add(s.jurisdiction);
+  });
+  if (currentTask.value?.homeJurisdiction) jurSet.add(currentTask.value.homeJurisdiction);
+  if (currentTask.value?.targetJurisdictions) {
+    currentTask.value.targetJurisdictions.forEach((tj) => jurSet.add(tj));
+  }
+  return Array.from(jurSet);
 });
 
 const filteredTasks = computed(() => {
@@ -160,10 +283,132 @@ watch([searchQuery, selectedStatuses, selectedJurisdictions, selectedLinkages], 
 
 const selectTask = (task: ComplianceTask) => {
   selectedTaskId.value = task.id;
+  isMatrixMode.value = false;
+  activeMatrixSession.value = null;
 };
 
 const handleBackToList = () => {
   selectedTaskId.value = null;
+  isMatrixMode.value = false;
+  activeMatrixSession.value = null;
+};
+
+// Handle in-place batch question creation
+const handleBatchQuestionsSubmit = (payload: {
+  questions: string[];
+  targetJurisdictions: string[];
+  clarificationNotes?: string;
+}) => {
+  if (!currentTask.value) return;
+
+  const added = taskStore.addBatchQuestionsToTask(currentTask.value.id, payload);
+  isBatchModalOpen.value = false;
+  emit(
+    'showToast',
+    'Questions Added',
+    `Successfully added ${added.length} questions in Batch ${(currentTask.value.batches?.length || 1)}.`,
+    'success'
+  );
+
+  // Automatically open Research Matrix for all task questions starting at the first newly added question
+  const newFocusIdx = currentTask.value.questions.findIndex((q) => q.id === added[0]?.id);
+  openMatrixForQuestions(
+    currentTask.value,
+    currentTask.value.questions.map((q) => q.questionText),
+    undefined,
+    newFocusIdx >= 0 ? newFocusIdx : 0
+  );
+};
+
+// Open Research Matrix Workbench for all questions or selected question
+const openMatrixForQuestions = (
+  task: ComplianceTask,
+  questionsList?: string[],
+  jurisdictionsList?: string[],
+  focusQuestionIndex = 0
+) => {
+  const qs = questionsList && questionsList.length > 0
+    ? questionsList
+    : task.questions.map((q) => q.questionText);
+
+  // Collect all jurisdictions relevant to this task
+  let jurs: string[] = [];
+  if (jurisdictionsList && jurisdictionsList.length > 0) {
+    jurs = jurisdictionsList;
+  } else {
+    const set = new Set<string>();
+    if (task.homeJurisdiction) set.add(task.homeJurisdiction);
+    if (task.targetJurisdictions) task.targetJurisdictions.forEach((tj) => set.add(tj));
+    task.questions.forEach((q) => {
+      if (q.targetJurisdictions) q.targetJurisdictions.forEach((tj) => set.add(tj));
+    });
+    jurs = set.size > 0 ? Array.from(set) : ['Hong Kong', 'Singapore', 'United Kingdom', 'United States'];
+  }
+
+  // Map jurisdiction names to standard 2-letter codes
+  const jurCodes = jurs.map((j) => {
+    const jLow = j.toLowerCase();
+    if (jLow.includes('hong kong') || jLow === 'hk') return 'HK';
+    if (jLow.includes('singapore') || jLow === 'sg') return 'SG';
+    if (jLow.includes('united kingdom') || jLow === 'uk') return 'UK';
+    if (jLow.includes('united states') || jLow === 'us') return 'US';
+    if (jLow.includes('australia') || jLow === 'au') return 'AU';
+    if (jLow.includes('japan') || jLow === 'jp') return 'JP';
+    if (jLow.includes('european union') || jLow === 'eu') return 'EU';
+    if (jLow.includes('indonesia') || jLow === 'id') return 'ID';
+    return j.slice(0, 2).toUpperCase();
+  });
+
+  const uniqueCodes = Array.from(new Set(jurCodes));
+  const session = createDynamicMatrixSession(qs, uniqueCodes, `${task.title} Matrix`);
+  session.activeQuestionIndex = focusQuestionIndex >= 0 && focusQuestionIndex < qs.length ? focusQuestionIndex : 0;
+  activeMatrixSession.value = session;
+  isMatrixMode.value = true;
+};
+
+// Export Questions CSV
+const handleExportTaskQuestionsCsv = (task: ComplianceTask) => {
+  const headers = [
+    'Global Index (#)',
+    'Question Text',
+    'Batch Q#',
+    'Batch',
+    'Target Jurisdiction(s)',
+    'Status',
+    'Summary Findings',
+    'Created At',
+  ];
+
+  const rows = task.questions.map((q, idx) => {
+    const globalIdx = (idx + 1).toString().padStart(2, '0');
+    const batchQ = `${q.batchIndex || (idx + 1)}Q`;
+    const batchLabel = q.batchLabel || (q.batchNumber ? `Batch ${q.batchNumber}` : 'Batch 1');
+    const jurs = (q.targetJurisdictions && q.targetJurisdictions.length > 0 ? q.targetJurisdictions : task.targetJurisdictions || [task.jurisdiction]).join(', ');
+
+    return [
+      `"${globalIdx}"`,
+      `"${q.questionText.replace(/"/g, '""')}"`,
+      `"${batchQ}"`,
+      `"${batchLabel}"`,
+      `"${jurs}"`,
+      `"${q.status}"`,
+      `"${(q.summary || '').replace(/"/g, '""')}"`,
+      `"${q.createdAt || task.updatedAt}"`,
+    ];
+  });
+
+  const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${task.title.replace(/[^a-zA-Z0-9]/g, '_')}_questions_${Date.now()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  emit('showToast', 'Export Successful', `Exported ${task.questions.length} questions to CSV.`, 'success');
 };
 
 const handleDeleteTask = (taskId: string) => {
@@ -459,30 +704,36 @@ const handleCreateFromTemplate = (tpl: (typeof starterTemplates)[0]) => {
     <!-- VIEW A: TASK DETAIL VIEW (When a task is selected)           -->
     <!-- ============================================================= -->
     <div v-if="currentTask" class="space-y-6">
-      <!-- Detail Top Navigation -->
+      <!-- Detail Header: Retain ONLY Title (+ Back navigation) -->
       <div class="flex items-center justify-between gap-4 border-b border-neutral-200 pb-4 flex-wrap">
-        <button
-          @click="handleBackToList"
-          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-neutral-200 hover:bg-neutral-100 text-xs font-semibold text-neutral-700 transition-colors cursor-pointer"
-        >
-          <ArrowLeft class="w-4 h-4" />
-          <span>Back to All Tasks</span>
-        </button>
-
-        <div class="flex items-center gap-2">
-          <!-- Export Report Button (Phase 2 Report compilation) -->
+        <div class="flex items-center gap-3 flex-wrap">
           <button
-            @click="isReportModalOpen = true"
-            class="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
+            @click="handleBackToList"
+            class="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-neutral-200 bg-white hover:bg-neutral-50 text-xs font-semibold text-neutral-700 transition-all shadow-2xs cursor-pointer"
           >
-            <FileText class="w-3.5 h-3.5" />
-            <span>Export Report</span>
+            <ArrowLeft class="w-4 h-4" />
+            <span>Back to All Tasks</span>
+          </button>
+          <h1 class="text-lg sm:text-xl font-bold text-neutral-900 tracking-tight">
+            {{ currentTask.title }}
+          </h1>
+        </div>
+
+        <div class="flex items-center gap-2 flex-wrap">
+          <!-- Open Research Matrix Workbench -->
+          <button
+            @click="openMatrixForQuestions(currentTask)"
+            class="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-all shadow-xs cursor-pointer"
+            title="Open Interactive Research Matrix Workbench"
+          >
+            <Sparkles class="w-3.5 h-3.5" />
+            <span>Research Matrix</span>
           </button>
 
           <!-- Delete Task -->
           <button
             @click="handleDeleteTask(currentTask.id)"
-            class="p-2 rounded-xl border border-neutral-200 hover:bg-rose-50 hover:text-rose-600 text-neutral-400 transition-colors cursor-pointer"
+            class="p-2 rounded-lg border border-neutral-200 bg-white hover:bg-rose-50 hover:text-rose-600 text-neutral-400 transition-colors cursor-pointer"
             title="Delete Task"
           >
             <Trash2 class="w-4 h-4" />
@@ -490,541 +741,407 @@ const handleCreateFromTemplate = (tpl: (typeof starterTemplates)[0]) => {
         </div>
       </div>
 
-      <!-- Task Header Card with Step 1 Contextual Setup Information -->
-      <div class="bg-white rounded-2xl border border-neutral-200 p-5 shadow-2xs space-y-3.5">
-        <div class="flex items-center justify-between gap-2 flex-wrap">
-          <div class="flex items-center gap-2 flex-wrap">
-            <span class="text-xs font-bold bg-blue-50 text-blue-700 px-2.5 py-1 rounded-md border border-blue-200 flex items-center gap-1.5 shadow-2xs flex-wrap">
-              <Globe class="w-3.5 h-3.5 text-blue-600 shrink-0" />
-              <span>{{ currentTask.homeJurisdiction || 'Hong Kong' }}</span>
-              <ArrowRight class="w-3 h-3 text-blue-400 shrink-0" />
-              <template v-if="currentTask.targetJurisdictions && currentTask.targetJurisdictions.length > 0">
-                <span class="flex items-center gap-1 flex-wrap">
-                  <span
-                    v-for="target in currentTask.targetJurisdictions"
-                    :key="`tgt-${target}`"
-                    class="bg-blue-100/80 text-blue-900 px-1.5 py-0.2 rounded text-[11px] font-semibold"
-                  >
-                    {{ target }}
-                  </span>
-                </span>
-              </template>
-              <span v-else>{{ currentTask.targetJurisdiction || currentTask.jurisdiction }}</span>
-            </span>
-            <span
-              class="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-neutral-100 text-neutral-800 border border-neutral-200"
-            >
-              <span
-                :class="`w-1.5 h-1.5 rounded-full ${
-                  currentTask.status === 'Completed'
-                    ? 'bg-emerald-500'
-                    : currentTask.status === 'Running'
-                    ? 'bg-blue-600 animate-pulse'
-                    : 'bg-amber-500'
-                }`"
-              />
-              <span>{{ currentTask.status }}</span>
-            </span>
-          </div>
-          <span class="text-xs text-neutral-500 font-mono">
-            Updated: {{ currentTask.updatedAt }}
-          </span>
-        </div>
+      <!-- ============================================================= -->
+      <!-- SUB-VIEW 1: RESEARCH MATRIX WORKBENCH (When active)           -->
+      <!-- ============================================================= -->
+      <ResearchMatrixWorkbench
+        v-if="isMatrixMode && activeMatrixSession"
+        :session="activeMatrixSession"
+        :taskId="currentTask.id"
+        :taskTitle="currentTask.title"
+        @back="isMatrixMode = false"
+        @openNewMatrixSetup="isBatchModalOpen = true"
+        @showToast="(title, msg, type) => emit('showToast', title, msg, type)"
+      />
 
-        <div>
-          <h1 class="text-lg sm:text-xl font-bold text-neutral-900 tracking-tight">
-            {{ currentTask.title }}
-          </h1>
-          <p v-if="currentTask.topic" class="text-xs text-neutral-600 mt-1">
-            <strong>Topic:</strong> {{ currentTask.topic }} • <strong>Lead Reviewer:</strong> {{ currentTask.owner }}
-          </p>
-        </div>
+      <!-- ============================================================= -->
+      <!-- SUB-VIEW 2: QUESTION LIST & BATCH MANAGEMENT (Default Detail) -->
+      <!-- ============================================================= -->
+      <div v-else class="space-y-6">
+        <!-- TASK CONTEXT & EVALUATION SCOPE: Grounded on aggregated sources & regulators from all questions -->
+        <div class="bg-white rounded-2xl border border-neutral-200 p-5 sm:p-6 shadow-2xs space-y-4">
+          <div class="flex items-center justify-between flex-wrap gap-2 border-b border-neutral-100 pb-3">
+            <div class="flex items-center gap-2.5">
+              <div class="w-8 h-8 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 shadow-2xs">
+                <FileText class="w-4 h-4" />
+              </div>
+              <div>
+                <h2 class="text-sm sm:text-base font-bold text-neutral-900 tracking-tight">
+                  Task Context & Evaluation Scope
+                </h2>
+                <p class="text-[11px] text-neutral-500">
+                  Authoritative regulatory inventory aggregated across all {{ currentTask.questions.length }} compliance inquiries in this task container.
+                </p>
+              </div>
+            </div>
 
-        <!-- Task Contextual Summary -->
-        <div v-if="currentTask.summary" class="p-3.5 rounded-xl bg-neutral-50 border border-neutral-200/80 text-xs text-neutral-700 leading-relaxed space-y-1">
-          <div class="font-bold text-neutral-800 text-[11px] uppercase tracking-wider flex items-center gap-1.5">
-            <FileText class="w-3.5 h-3.5 text-blue-600" />
-            <span>Task Context & Evaluation Scope:</span>
-          </div>
-          <p class="text-neutral-700 text-xs leading-relaxed">{{ currentTask.summary }}</p>
-        </div>
-      </div>
-
-      <!-- LINKED CONTEXT: 
-           Separated into:
-           1. Linked News & Publications (Sources cited in answers below, bookmark to Directory)
-           2. Linked Regulatory Authorities (Regulators involved in answers below, follow in scope)
-           Toggleable collapse/expand button to temporarily tuck them away
-      -->
-      <div class="space-y-3">
-        <!-- Section Header with Collapse/Expand Button -->
-        <div class="flex items-center justify-between flex-wrap gap-2">
-          <div>
-            <div class="flex items-center gap-2">
-              <h3 class="text-xs font-bold uppercase tracking-wider text-neutral-800 flex items-center gap-1.5">
-                <Layers class="w-4 h-4 text-blue-600" />
-                <span>Linked Sources & Authorities</span>
-              </h3>
-              <span class="text-xs text-neutral-500 font-medium">
-                ({{ allTaskSources.length }} Publications • {{ allTaskAuthorities.length }} Regulators)
+            <div class="flex items-center gap-2 flex-wrap text-xs">
+              <span class="font-bold bg-neutral-100 text-neutral-800 px-2.5 py-1 rounded-md border border-neutral-200">
+                {{ taskAggregatedRegulators.length }} Regulators in Scope
+              </span>
+              <span class="font-bold bg-blue-50 text-blue-700 px-2.5 py-1 rounded-md border border-blue-200 font-mono">
+                {{ taskAggregatedSources.length }} Grounding Sources
               </span>
             </div>
-            <p class="text-[11px] text-neutral-500 mt-0.5">
-              Authoritative sources retrieved for the questions below. Bookmark publications to Directory or follow authorities for continuous monitoring.
+          </div>
+
+          <!-- Task Summary & Background Context -->
+          <div class="p-3.5 rounded-xl bg-neutral-50 border border-neutral-200/80 text-xs text-neutral-700 leading-relaxed space-y-1.5">
+            <div class="font-bold text-neutral-800 text-[11px] uppercase tracking-wider flex items-center gap-1.5">
+              <Sparkles class="w-3.5 h-3.5 text-blue-600" />
+              <span>Supervisory Context & Cross-Border Scope</span>
+            </div>
+            <p class="leading-relaxed font-sans">
+              {{ currentTask.summary || 'Comprehensive multi-jurisdictional evaluation scope benchmarking operational compliance standards, incident reporting requirements, and statutory governance.' }}
             </p>
           </div>
 
-          <!-- Section Toggle Button to temporarily hide/collapse -->
-          <button
-            type="button"
-            @click="isLinkedContextCollapsed = !isLinkedContextCollapsed"
-            class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-neutral-700 hover:text-neutral-900 bg-white hover:bg-neutral-100 border border-neutral-200 transition-colors shadow-2xs cursor-pointer"
-            :title="isLinkedContextCollapsed ? 'Expand linked publications and authorities' : 'Hide / collapse linked publications and authorities'"
-          >
-            <EyeOff v-if="!isLinkedContextCollapsed" class="w-3.5 h-3.5 text-neutral-500" />
-            <Eye v-else class="w-3.5 h-3.5 text-neutral-500" />
-            <span>{{ isLinkedContextCollapsed ? 'Show Linked Sources' : 'Hide Linked Sources' }}</span>
-          </button>
-        </div>
-
-        <!-- Collapsed Compact Preview Bar (When Collapsed) -->
-        <div
-          v-if="isLinkedContextCollapsed"
-          @click="isLinkedContextCollapsed = false"
-          class="p-3.5 bg-neutral-50 hover:bg-neutral-100/90 rounded-2xl border border-neutral-200 flex items-center justify-between text-xs text-neutral-600 cursor-pointer transition-colors shadow-2xs group"
-        >
-          <div class="flex items-center gap-2 flex-wrap">
-            <span class="font-bold text-neutral-800 flex items-center gap-1.5">
-              <EyeOff class="w-3.5 h-3.5 text-neutral-500" />
-              <span>Linked sources temporarily hidden:</span>
-            </span>
-            <span class="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-md font-semibold text-[11px]">
-              {{ allTaskSources.length }} Publications (Connected to Directory Bookmarks)
-            </span>
-            <span class="text-neutral-300">•</span>
-            <span class="bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-md font-semibold text-[11px]">
-              {{ allTaskAuthorities.length }} Regulators (Connected to Surveillance Scope)
-            </span>
-          </div>
-          <span class="text-blue-600 font-bold flex items-center gap-1 group-hover:underline text-xs">
-            <span>Click to Expand</span>
-            <ChevronDown class="w-3.5 h-3.5" />
-          </span>
-        </div>
-
-        <!-- Expanded 2-Column Grid (When Not Collapsed) -->
-        <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <!-- Linked News & Publications -->
-          <div class="bg-white rounded-2xl border border-neutral-200 p-4.5 shadow-2xs space-y-3">
-            <div class="flex items-center justify-between">
-              <div>
-                <h3 class="text-xs font-bold uppercase tracking-wider text-neutral-800 flex items-center gap-1.5">
-                  <FileText class="w-4 h-4 text-blue-600" />
-                  <span>Linked News & Publications ({{ allTaskSources.length }})</span>
-                </h3>
-                <p class="text-[11px] text-neutral-400 mt-0.5">
-                  Sources cited in question answers below
-                </p>
-              </div>
-              <div class="flex items-center gap-1.5">
-                <span class="text-[10px] text-blue-600 font-semibold bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
-                  Directory Bookmarks
-                </span>
-                <button
-                  type="button"
-                  @click="isNewsCollapsed = !isNewsCollapsed"
-                  class="p-1 rounded-md text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors"
-                  :title="isNewsCollapsed ? 'Expand card' : 'Collapse card'"
-                >
-                  <ChevronDown v-if="isNewsCollapsed" class="w-3.5 h-3.5" />
-                  <ChevronUp v-else class="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-
-            <div v-show="!isNewsCollapsed">
-              <div v-if="allTaskSources.length === 0" class="text-xs text-neutral-400 py-3 text-center italic">
-                No specific publication sources retrieved for this task yet.
+          <!-- Two-column Layout: Sources on Left (only title and official link) & Deduplicated Regulators on Right -->
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 pt-1 items-start">
+            <!-- Left Side: Sources (only need the title and Official link) -->
+            <div class="lg:col-span-7 xl:col-span-8 space-y-2.5">
+              <div class="flex items-center justify-between pb-1.5 border-b border-neutral-100">
+                <div class="text-[11px] font-bold text-neutral-600 uppercase tracking-wider flex items-center gap-1.5">
+                  <FileText class="w-3.5 h-3.5 text-blue-600" />
+                  <span>Sources ({{ taskAggregatedSources.length }})</span>
+                </div>
+                <span class="text-[11px] text-neutral-400">All Question Grounding Authorities</span>
               </div>
 
-              <div v-else class="space-y-2.5 max-h-64 overflow-y-auto pr-1">
+              <div v-if="taskAggregatedSources.length === 0" class="p-6 text-center text-xs text-neutral-400 italic bg-neutral-50/70 rounded-xl border border-neutral-200">
+                No external sources recorded for this task.
+              </div>
+
+              <!-- List of sources: ONLY title and Official link as requested -->
+              <div v-else class="space-y-2">
                 <div
-                  v-for="source in allTaskSources"
-                  :key="source.id || source.url"
-                  class="p-3 rounded-xl bg-neutral-50/90 border border-neutral-200/80 hover:bg-white hover:border-blue-300 transition-all flex flex-col justify-between gap-2 text-xs"
+                  v-for="(source, sIdx) in taskAggregatedSources"
+                  :key="`agg-src-${sIdx}`"
+                  class="p-3 sm:p-3.5 rounded-xl bg-white border border-neutral-200 shadow-2xs hover:border-neutral-300 flex items-center justify-between gap-3 transition-colors text-xs"
                 >
-                  <div>
-                    <div class="flex items-center justify-between gap-2 mb-1">
-                      <div class="flex items-center gap-1.5">
-                        <span class="text-[10px] font-bold bg-blue-600 text-white px-1.5 py-0.2 rounded">
-                          {{ source.authority }}
-                        </span>
-                        <span class="text-[10px] text-neutral-600 font-medium bg-neutral-200/70 px-1.5 py-0.2 rounded">
-                          {{ source.jurisdiction }}
-                        </span>
-                      </div>
-                      <span class="text-[10px] text-neutral-400 font-mono">
-                        {{ source.publishDate || 'Official Gazetted' }}
-                      </span>
-                    </div>
-
-                    <!-- Clickable title: opens DetailDrawer -->
-                    <button
-                      type="button"
-                      @click="handleOpenSourceInDrawer(source)"
-                      class="text-left font-bold text-neutral-900 hover:text-blue-600 transition-colors text-xs leading-snug cursor-pointer group flex items-start gap-1"
-                      title="Click to open Detail Drawer with official jump link"
-                    >
-                      <span class="group-hover:underline">{{ source.title }}</span>
-                      <ExternalLink class="w-3 h-3 text-neutral-400 group-hover:text-blue-600 shrink-0 mt-0.5" />
-                    </button>
+                  <div class="font-semibold text-neutral-900 leading-snug line-clamp-2 pr-2">
+                    {{ source.title }}
                   </div>
-
-                  <!-- Action Bar: Direct jump link & Bookmark to Directory -->
-                  <div class="flex items-center justify-between pt-1 border-t border-neutral-200/60 text-[11px]">
-                    <a
-                      :href="source.url"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      class="text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1"
-                    >
-                      <span>Official URL</span>
-                      <ExternalLink class="w-3 h-3" />
-                    </a>
-
-                    <button
-                      type="button"
-                      @click="handleToggleSourceBookmark(source)"
-                      :class="`flex items-center gap-1 px-2.5 py-1 rounded-lg border font-semibold transition-colors cursor-pointer shadow-2xs ${
-                        directoryStore.isBookmarked(source.id, undefined, source.title)
-                          ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
-                          : 'bg-white text-neutral-700 border-neutral-200 hover:bg-neutral-100'
-                      }`"
-                      :title="directoryStore.isBookmarked(source.id, undefined, source.title) ? 'Bookmarked in Directory' : 'Bookmark to Directory Bookmarks'"
-                    >
-                      <BookmarkCheck
-                        v-if="directoryStore.isBookmarked(source.id, undefined, source.title)"
-                        class="w-3.5 h-3.5 text-white/90"
-                      />
-                      <Bookmark v-else class="w-3.5 h-3.5 text-neutral-400" />
-                      <span>{{ directoryStore.isBookmarked(source.id, undefined, source.title) ? 'Bookmarked' : 'Bookmark to Directory' }}</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Linked Regulatory Authorities -->
-          <div class="bg-white rounded-2xl border border-neutral-200 p-4.5 shadow-2xs space-y-3">
-            <div class="flex items-center justify-between">
-              <div>
-                <h3 class="text-xs font-bold uppercase tracking-wider text-neutral-800 flex items-center gap-1.5">
-                  <Building2 class="w-4 h-4 text-indigo-600" />
-                  <span>Linked Regulatory Authorities ({{ allTaskAuthorities.length }})</span>
-                </h3>
-                <p class="text-[11px] text-neutral-400 mt-0.5">
-                  Supervisory bodies involved in question answers below
-                </p>
-              </div>
-              <div class="flex items-center gap-1.5">
-                <span class="text-[10px] text-indigo-700 font-semibold bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200">
-                  Surveillance Scope
-                </span>
-                <button
-                  type="button"
-                  @click="isRegulatorsCollapsed = !isRegulatorsCollapsed"
-                  class="p-1 rounded-md text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors"
-                  :title="isRegulatorsCollapsed ? 'Expand card' : 'Collapse card'"
-                >
-                  <ChevronDown v-if="isRegulatorsCollapsed" class="w-3.5 h-3.5" />
-                  <ChevronUp v-else class="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-
-            <div v-show="!isRegulatorsCollapsed">
-              <div v-if="allTaskAuthorities.length === 0" class="text-xs text-neutral-400 py-3 text-center italic">
-                No specific regulatory authorities detected in this task.
-              </div>
-
-              <div v-else class="space-y-2.5 max-h-64 overflow-y-auto pr-1">
-                <div
-                  v-for="auth in allTaskAuthorities"
-                  :key="auth.acronym"
-                  class="p-3 rounded-xl bg-neutral-50/90 border border-neutral-200/80 hover:bg-white hover:border-indigo-300 transition-all flex items-center justify-between gap-3 text-xs"
-                >
-                  <div class="min-w-0 flex-1">
-                    <div class="flex items-center gap-1.5">
-                      <span class="font-bold text-neutral-900 text-xs">
-                        {{ auth.acronym }}
-                      </span>
-                      <span class="text-[10px] text-neutral-500 bg-neutral-200/60 px-1.5 py-0.2 rounded font-medium">
-                        {{ auth.jurisdiction }}
-                      </span>
-                    </div>
-                    <div class="text-[11px] text-neutral-600 truncate mt-0.5">
-                      {{ auth.name }}
-                    </div>
-                  </div>
-
-                  <!-- Action: Follow / Unfollow Regulator in Scope -->
-                  <div class="shrink-0 flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      @click="handleToggleAuthorityFollow(auth)"
-                      :class="`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
-                        auth.isFollowed
-                          ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
-                          : 'bg-white text-neutral-700 border-neutral-200 hover:bg-neutral-50'
-                      }`"
-                      :title="auth.isFollowed ? `Currently following ${auth.acronym}` : `Follow ${auth.acronym} in Surveillance Scope`"
-                    >
-                      <UserCheck v-if="auth.isFollowed" class="w-3.5 h-3.5 text-blue-600" />
-                      <UserPlus v-else class="w-3.5 h-3.5 text-neutral-400" />
-                      <span>{{ auth.isFollowed ? 'Following' : '+ Follow' }}</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- QUESTIONS & OFFICIAL RETRIEVED SOURCES -->
-      <div class="space-y-5">
-        <div class="flex items-center justify-between">
-          <h2 class="text-sm font-bold text-neutral-900 flex items-center gap-2">
-            <ClipboardList class="w-4 h-4 text-blue-600" />
-            <span>Compliance Questions & Findings ({{ currentTask.questions.length }})</span>
-          </h2>
-          <span class="text-xs text-neutral-500">Side-by-Side Comparison: Analysis ⟷ Official Grounding Sources</span>
-        </div>
-
-        <div class="space-y-6">
-          <div
-            v-for="(q, idx) in currentTask.questions"
-            :key="q.id"
-            class="bg-white rounded-2xl border border-neutral-200 p-5 sm:p-6 shadow-2xs space-y-4"
-          >
-            <!-- Question Heading -->
-            <div class="border-b border-neutral-100 pb-3 flex items-start justify-between gap-3">
-              <div>
-                <div class="text-[10px] font-bold text-blue-600 uppercase tracking-wider mb-1">
-                  Question {{ idx + 1 }}
-                </div>
-                <h3 class="text-sm sm:text-base font-bold text-neutral-900 leading-snug">
-                  {{ q.questionText }}
-                </h3>
-              </div>
-              <span class="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full shrink-0">
-                {{ q.status }}
-              </span>
-            </div>
-
-            <!-- Side-by-side split layout: Left = Answer & Citations, Right = Retrieved Official Sources & Rationale -->
-            <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-              <!-- Left Column: AI Generated Answer (answer_text) with precise citation pins -->
-              <div class="lg:col-span-7 space-y-3">
-                <div class="flex items-center justify-between">
-                  <div class="text-xs font-bold text-neutral-800 flex items-center gap-1.5">
-                    <Sparkles class="w-4 h-4 text-blue-600" />
-                    <span>Regulatory Analysis & Statutory Grounding</span>
-                  </div>
-                  <span class="text-[11px] text-neutral-400 font-mono">answer_text{{ idx + 1 }}</span>
-                </div>
-
-                <div class="p-4.5 bg-neutral-50 rounded-2xl border border-neutral-200/90 leading-relaxed text-xs sm:text-sm text-neutral-800 whitespace-pre-line shadow-2xs">
-                  {{ q.llmAnswer }}
-                </div>
-
-                <!-- Citation Pins list -->
-                <div v-if="q.citations && q.citations.length > 0" class="space-y-1.5 pt-1">
-                  <div class="text-[11px] font-bold text-neutral-500 uppercase tracking-wider flex items-center gap-1">
-                    <Pin class="w-3 h-3 text-blue-600" />
-                    <span>Precise Text Citations ({{ q.citations.length }})</span>
-                  </div>
-                  <div class="flex flex-wrap gap-2">
-                    <button
-                      v-for="c in q.citations"
-                      :key="c.pin"
-                      @click="activeCitation = c"
-                      class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-semibold transition-colors cursor-pointer"
-                      title="Click to inspect citation clause and excerpt"
-                    >
-                      <Pin class="w-3 h-3 text-blue-600" />
-                      <span>{{ c.pin }}</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Right Column: Authoritative Official Sources Retrieved, Applicability Rationale & Monitoring -->
-              <div class="lg:col-span-5 space-y-3">
-                <div class="flex items-center justify-between gap-2 flex-wrap">
-                  <div class="text-xs font-semibold text-neutral-900 flex items-center gap-1.5">
-                    <FileText class="w-4 h-4 text-neutral-700" />
-                    <span>Official Grounding Sources</span>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <!-- Confidence Overall Badge -->
-                    <span
-                      class="inline-flex items-center gap-1.5 text-[11px] font-semibold text-neutral-900 bg-neutral-100 border border-neutral-200 px-2 py-0.5 rounded"
-                      title="Confidence: Grounding certainty based on primary regulatory provisions and gazetted legal authorities."
-                    >
-                      <span class="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                      <span>Confidence: 98% High (Verified)</span>
-                    </span>
-                    <span class="text-[11px] text-neutral-500 font-normal">
-                      {{ q.retrievedUrls.length }} Sources
-                    </span>
-                  </div>
-                </div>
-
-                <div class="space-y-3">
-                  <div
-                    v-for="(url, urlIdx) in q.retrievedUrls"
-                    :key="url.id"
-                    class="p-4 rounded-xl bg-white border border-neutral-200 shadow-2xs hover:border-neutral-300 transition-all space-y-2.5"
+                  <a
+                    :href="source.url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-blue-600 hover:text-blue-700 bg-blue-50/70 hover:bg-blue-100/70 border border-blue-200 transition-colors"
                   >
-                    <!-- Source Header: Authority badge, Jurisdiction, Confidence, and clickable title to open Slide-over Drawer -->
-                    <div>
-                      <div class="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
-                        <div class="flex items-center gap-1.5 flex-wrap">
-                          <span class="text-[10px] font-semibold bg-blue-600 text-white px-2 py-0.5 rounded shadow-2xs">
-                            {{ url.authority }}
-                          </span>
-                          <span class="text-[11px] font-normal text-neutral-700 bg-neutral-100 px-2 py-0.5 rounded">
-                            {{ url.jurisdiction }}
-                          </span>
-                          <!-- Confidence Badge -->
-                          <span
-                            class="inline-flex items-center gap-1 text-[10px] font-semibold text-neutral-900 bg-neutral-100 border border-neutral-200 px-1.5 py-0.5 rounded"
-                            title="Confidence: Grounding certainty based on primary regulatory provisions."
-                          >
-                            <span class="w-1 h-1 rounded-full bg-emerald-500" />
-                            <span>Confidence: {{ getSourceConfidence(url, urlIdx).score }}% • Verified</span>
-                          </span>
-                        </div>
-                        <span class="text-[10px] text-neutral-500 font-mono">
-                          {{ url.publishDate || 'Official Gazetted' }}
-                        </span>
+                    <span>Official Link</span>
+                    <ExternalLink class="w-3.5 h-3.5" />
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right Side: 去重集合主管機關 (Deduplicated Regulators in Scope) -->
+            <div class="lg:col-span-5 xl:col-span-4 space-y-2.5">
+              <div class="flex items-center justify-between pb-1.5 border-b border-neutral-100">
+                <div class="text-[11px] font-bold text-neutral-600 uppercase tracking-wider flex items-center gap-1.5">
+                  <Building2 class="w-3.5 h-3.5 text-blue-600" />
+                  <span>主管機關 ({{ taskDeduplicatedRegulatorsDetail.length }})</span>
+                </div>
+                <span class="text-[11px] text-neutral-400 font-mono">Deduplicated</span>
+              </div>
+
+              <div v-if="taskDeduplicatedRegulatorsDetail.length === 0" class="p-6 text-center text-xs text-neutral-400 italic bg-neutral-50/70 rounded-xl border border-neutral-200">
+                No supervisory authorities identified in task scope.
+              </div>
+
+              <div v-else class="space-y-2">
+                <div
+                  v-for="reg in taskDeduplicatedRegulatorsDetail"
+                  :key="reg.acronym"
+                  class="p-3 sm:p-3.5 rounded-xl bg-white border border-neutral-200 shadow-2xs flex items-center justify-between gap-3 text-xs"
+                >
+                  <div class="flex items-center gap-2.5 min-w-0">
+                    <span class="text-xs font-bold bg-blue-600 text-white px-2.5 py-1 rounded-md shadow-2xs shrink-0">
+                      {{ reg.acronym }}
+                    </span>
+                    <div class="min-w-0">
+                      <div class="font-bold text-neutral-900 truncate">
+                        {{ reg.name }}
                       </div>
-
-                      <!-- Clickable Title: opens right slide-over Drawer -->
-                      <button
-                        type="button"
-                        @click="handleOpenSourceInDrawer(url)"
-                        class="text-left font-semibold text-neutral-900 hover:text-blue-600 transition-colors text-xs leading-snug cursor-pointer group flex items-start gap-1"
-                        title="Click to slide out Detail Drawer with official document jump link"
-                      >
-                        <span class="group-hover:underline">{{ url.title }}</span>
-                        <ExternalLink class="w-3 h-3 text-neutral-400 group-hover:text-blue-600 shrink-0 mt-0.5" />
-                      </button>
-
-                      <div class="flex items-center gap-2 mt-1">
-                        <a
-                          :href="url.url"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          class="text-[11px] text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 transition-colors"
-                        >
-                          <span>Official Link</span>
-                          <ExternalLink class="w-3 h-3" />
-                        </a>
+                      <div class="text-[10px] text-neutral-500 font-medium">
+                        {{ reg.jurisdiction }}
                       </div>
-                    </div>
-
-                    <!-- Applicability Rationale -->
-                    <div class="p-2.5 rounded-lg bg-neutral-50 border border-neutral-200 text-xs text-neutral-800 space-y-1">
-                      <div class="font-semibold flex items-center gap-1 text-[11px] text-neutral-900">
-                        <span>Applicability Rationale:</span>
-                      </div>
-                      <p class="text-[11px] text-neutral-700 leading-relaxed font-normal">
-                        {{ url.rationale || 'Directly sets statutory compliance and supervisory reporting mandates for this task inquiry.' }}
-                      </p>
-                    </div>
-
-                    <!-- Confidence Grounding Explanation -->
-                    <div class="p-2.5 rounded-lg bg-neutral-50 border border-neutral-200 text-xs text-neutral-800 space-y-1">
-                      <div class="font-semibold flex items-center justify-between text-[11px] text-neutral-900">
-                        <div class="flex items-center gap-1.5">
-                          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                          <span>Confidence: {{ getSourceConfidence(url, urlIdx).score }}% • Verified Grounding</span>
-                        </div>
-                        <span class="text-[10px] font-mono text-neutral-600 bg-white px-1.5 py-0.2 rounded border border-neutral-200">
-                          Statutory Proof
-                        </span>
-                      </div>
-                      <p class="text-[11px] text-neutral-700 leading-relaxed font-normal">
-                        Grounding certainty anchored directly in {{ url.authority }} official gazetted legislation and supervisory circulars, excluding speculative interpretations.
-                      </p>
-                    </div>
-
-                    <!-- Authentic Clause Excerpt if available -->
-                    <div v-if="url.excerpt" class="p-2.5 rounded-lg bg-neutral-50 text-[11px] font-mono text-neutral-700 leading-relaxed border border-neutral-200">
-                      <div class="text-[10px] text-neutral-400 font-sans font-semibold uppercase mb-0.5">Authentic Clause Excerpt</div>
-                      {{ url.excerpt }}
-                    </div>
-
-                    <!-- Monitoring: Follow authority in scope or bookmark URL -->
-                    <div class="pt-2 border-t border-neutral-100 flex items-center justify-between gap-2">
-                      <!-- Follow Authority Button -->
-                      <button
-                        type="button"
-                        @click="handleToggleUrlFollow(currentTask.id, q.id, url)"
-                        :class="`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
-                          url.isFollowed
-                            ? 'bg-neutral-900 text-white border-neutral-900 hover:bg-neutral-800'
-                            : 'bg-white text-neutral-700 border-neutral-200 hover:bg-neutral-50'
-                        }`"
-                        :title="url.isFollowed ? `Currently following ${url.authority}` : `Follow ${url.authority} for surveillance`"
-                      >
-                        <UserCheck v-if="url.isFollowed" class="w-3.5 h-3.5 text-neutral-300" />
-                        <UserPlus v-else class="w-3.5 h-3.5 text-neutral-500" />
-                        <span>{{ url.isFollowed ? 'Followed ' + url.authority : 'Follow ' + url.authority }}</span>
-                      </button>
-
-                      <!-- Bookmark URL Button -->
-                      <button
-                        type="button"
-                        @click="handleToggleUrlBookmark(currentTask.id, q.id, url)"
-                        :class="`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors cursor-pointer shadow-2xs ${
-                          url.isBookmarked
-                            ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700'
-                            : 'bg-white text-neutral-700 border-neutral-200 hover:bg-neutral-50'
-                        }`"
-                        :title="url.isBookmarked ? 'Bookmarked in Directory' : 'Bookmark to Directory Bookmarks'"
-                      >
-                        <BookmarkCheck v-if="url.isBookmarked" class="w-3.5 h-3.5 text-white/90" />
-                        <Bookmark v-else class="w-3.5 h-3.5 text-neutral-400" />
-                        <span>{{ url.isBookmarked ? 'Bookmarked' : 'Bookmark' }}</span>
-                      </button>
                     </div>
                   </div>
+
+                  <span class="shrink-0 text-[10px] font-semibold text-neutral-600 bg-neutral-100 border border-neutral-200 px-2 py-0.5 rounded">
+                    In Scope
+                  </span>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- Consolidated Summary -->
-        <div class="bg-white rounded-xl p-4 sm:p-5 border border-neutral-200 shadow-2xs space-y-3">
-          <div class="flex items-center justify-between flex-wrap gap-2">
-            <div class="flex items-center gap-2">
-              <Sparkles class="w-4 h-4 text-neutral-800" />
-              <h3 class="text-sm sm:text-base font-semibold text-neutral-900 tracking-tight">
-                Consolidated Compliance Summary (Cross-Regulatory Synthesis)
-              </h3>
+        <!-- QUESTIONS MASTER TABLE: Total Counter & Batch Tracking (As Specified) -->
+        <div class="bg-white rounded-2xl border border-neutral-200 shadow-2xs overflow-hidden space-y-0">
+          <!-- Table Header Controls Bar -->
+          <div class="p-4 sm:p-5 border-b border-neutral-200 flex items-center justify-between flex-wrap gap-3 bg-neutral-50/70">
+            <div>
+              <div class="flex items-center gap-2.5 flex-wrap">
+                <h2 class="text-sm sm:text-base font-bold text-neutral-900 flex items-center gap-2">
+                  <ClipboardList class="w-4 h-4 text-blue-600" />
+                  <span>Question Master List</span>
+                </h2>
+
+                <!-- Total Counter (Total X Questions across Y Batches) -->
+                <span class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                  Total {{ currentTask.questions.length }} Questions
+                </span>
+
+                <span
+                  v-if="currentTask.batches && currentTask.batches.length > 0"
+                  class="text-[11px] font-semibold text-neutral-500 bg-neutral-100 px-2 py-0.5 rounded-full border border-neutral-200"
+                >
+                  {{ currentTask.batches.length }} Batches Recorded
+                </span>
+              </div>
+              <p class="text-xs text-neutral-500 mt-1">
+                Accumulated multi-batch questions categorized by source batch and applicable target jurisdictions.
+              </p>
             </div>
-            <span class="text-[11px] bg-neutral-100 text-neutral-700 border border-neutral-200 px-2 py-0.5 rounded font-mono font-normal">
-              Cross-Jurisdictional Synthesis
-            </span>
+
+            <!-- View Layout & Actions Bar -->
+            <div class="flex items-center gap-2 flex-wrap">
+              <!-- Flat Table vs Collapsible Batch Grouping Switch -->
+              <div class="flex items-center bg-neutral-100 p-0.5 rounded-lg border border-neutral-200">
+                <button
+                  type="button"
+                  @click="isBatchGroupedView = false"
+                  :class="`px-2.5 py-1 text-xs font-semibold rounded-md transition-all cursor-pointer ${
+                    !isBatchGroupedView
+                      ? 'bg-white text-neutral-900 shadow-2xs'
+                      : 'text-neutral-500 hover:text-neutral-900'
+                  }`"
+                >
+                  Flat Table
+                </button>
+                <button
+                  type="button"
+                  @click="isBatchGroupedView = true"
+                  :class="`px-2.5 py-1 text-xs font-semibold rounded-md transition-all cursor-pointer ${
+                    isBatchGroupedView
+                      ? 'bg-white text-neutral-900 shadow-2xs'
+                      : 'text-neutral-500 hover:text-neutral-900'
+                  }`"
+                >
+                  Grouped by Batch
+                </button>
+              </div>
+
+              <!-- Create Question (In-Place Batch Add) -->
+              <button
+                type="button"
+                @click="isBatchModalOpen = true"
+                class="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-all shadow-xs cursor-pointer"
+              >
+                <Plus class="w-3.5 h-3.5" />
+                <span>Create Question</span>
+              </button>
+
+              <!-- Export CSV -->
+              <button
+                type="button"
+                @click="handleExportTaskQuestionsCsv(currentTask)"
+                class="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-700 text-xs font-semibold transition-all shadow-2xs cursor-pointer"
+                title="Export Questions to CSV"
+              >
+                <Download class="w-3.5 h-3.5" />
+                <span>Export CSV</span>
+              </button>
+            </div>
           </div>
 
-          <div class="text-xs sm:text-sm text-neutral-800 leading-relaxed whitespace-pre-line bg-neutral-50 p-4 rounded-lg border border-neutral-200 font-sans font-normal">
-            {{ currentTask.consolidatedSummary || 'Comprehensive multi-jurisdictional synthesis generated across all retrieved statutory circulars, divergence benchmarks, and operational safeguards.' }}
+          <!-- TABLE: Flat Table View -->
+          <div v-if="!isBatchGroupedView" class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+              <thead class="bg-neutral-50 border-b border-neutral-200 font-bold text-neutral-700">
+                <tr>
+                  <th class="p-3 w-16 text-center font-mono">全局序號 (#)</th>
+                  <th class="p-3">問題標題 / 內容 (Question)</th>
+                  <th class="p-3 w-28 text-center">批次內序號 (Batch Q#)</th>
+                  <th class="p-3 w-32">所屬批次 (Batch)</th>
+                  <th class="p-3 w-44">目標法域 (Target Jurisdiction)</th>
+                  <th class="p-3 w-28 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-neutral-100">
+                <tr
+                  v-for="(q, idx) in currentTask.questions"
+                  :key="q.id"
+                  class="hover:bg-neutral-50/80 transition-colors group cursor-pointer"
+                  @click="openMatrixForQuestions(currentTask, currentTask.questions.map((qu) => qu.questionText), undefined, idx)"
+                >
+                  <!-- 全局序號 (#): 01, 02, 03... -->
+                  <td class="p-3 text-center font-mono text-neutral-500 font-bold">
+                    {{ (idx + 1).toString().padStart(2, '0') }}
+                  </td>
+
+                  <!-- 問題標題 / 內容 (Question) -->
+                  <td class="p-3">
+                    <div class="font-bold text-neutral-900 group-hover:text-blue-600 transition-colors line-clamp-2">
+                      {{ q.questionText }}
+                    </div>
+                    <div v-if="q.summary" class="text-[11px] text-neutral-500 mt-0.5 line-clamp-1">
+                      {{ q.summary }}
+                    </div>
+                  </td>
+
+                  <!-- 批次內序號 (Batch Q#): 1Q, 2Q, 3Q... -->
+                  <td class="p-3 text-center">
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-md font-mono font-bold text-[11px] bg-blue-50 text-blue-700 border border-blue-200">
+                      {{ q.batchIndex || idx + 1 }}Q
+                    </span>
+                  </td>
+
+                  <!-- 所屬批次 (Batch): Batch 1, Batch 2... -->
+                  <td class="p-3">
+                    <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-neutral-100 text-neutral-800 border border-neutral-200">
+                      <Layers class="w-3 h-3 text-neutral-500" />
+                      <span>{{ q.batchLabel || (q.batchNumber ? `Batch ${q.batchNumber}` : 'Batch 1') }}</span>
+                    </span>
+                  </td>
+
+                  <!-- 目標法域 (Target Jurisdiction): HK, SG, UK, US... -->
+                  <td class="p-3">
+                    <div class="flex items-center gap-1 flex-wrap">
+                      <template v-if="q.targetJurisdictions && q.targetJurisdictions.length > 0">
+                        <span
+                          v-for="jur in q.targetJurisdictions"
+                          :key="jur"
+                          class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-neutral-100 text-neutral-700 border border-neutral-200/80"
+                        >
+                          {{ jur === 'Hong Kong' ? 'HK' : jur === 'Singapore' ? 'SG' : jur === 'United Kingdom' ? 'UK' : jur === 'United States' ? 'US' : jur === 'European Union' ? 'EU' : jur }}
+                        </span>
+                      </template>
+                      <template v-else-if="currentTask.targetJurisdictions && currentTask.targetJurisdictions.length > 0">
+                        <span
+                          v-for="jur in currentTask.targetJurisdictions"
+                          :key="jur"
+                          class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-neutral-100 text-neutral-700 border border-neutral-200/80"
+                        >
+                          {{ jur === 'Hong Kong' ? 'HK' : jur === 'Singapore' ? 'SG' : jur === 'United Kingdom' ? 'UK' : jur === 'United States' ? 'US' : jur }}
+                        </span>
+                      </template>
+                      <span v-else class="text-[11px] text-neutral-500">{{ currentTask.jurisdiction }}</span>
+                    </div>
+                  </td>
+
+                  <!-- Actions: View in Matrix -->
+                  <td class="p-3 text-right" @click.stop>
+                    <button
+                      type="button"
+                      @click="openMatrixForQuestions(currentTask, currentTask.questions.map((qu) => qu.questionText), undefined, idx)"
+                      class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-blue-600 hover:bg-blue-50 border border-blue-200 transition-colors cursor-pointer"
+                    >
+                      <span>View Matrix</span>
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- TABLE: Grouped by Batch View (Collapsible Grouping) -->
+          <div v-else class="divide-y divide-neutral-200">
+            <div
+              v-for="batch in (currentTask.batches && currentTask.batches.length > 0 ? currentTask.batches : [{ batchNumber: 1, batchLabel: 'Batch 1', createdAt: currentTask.createdAt, targetJurisdictions: currentTask.targetJurisdictions || ['Hong Kong', 'Singapore'], questionCount: currentTask.questions.length }])"
+              :key="batch.batchLabel"
+              class="space-y-0"
+            >
+              <!-- Batch Collapsible Accordion Header -->
+              <div
+                @click="toggleBatchCollapse(batch.batchLabel)"
+                class="p-3.5 bg-neutral-50/90 hover:bg-neutral-100/90 transition-colors flex items-center justify-between cursor-pointer border-b border-neutral-200"
+              >
+                <div class="flex items-center gap-2.5 flex-wrap">
+                  <span class="font-bold text-xs bg-neutral-900 text-white px-2 py-0.5 rounded-md">
+                    {{ batch.batchLabel }}
+                  </span>
+                  <span class="text-xs font-bold text-neutral-800">
+                    {{ currentTask.questions.filter((q) => (q.batchLabel === batch.batchLabel) || (!q.batchLabel && batch.batchNumber === 1)).length }} Questions
+                  </span>
+                  <span class="text-[11px] text-neutral-500">
+                    &bull; Target: {{ batch.targetJurisdictions.join(', ') }}
+                  </span>
+                  <span v-if="batch.createdAt" class="text-[11px] font-mono text-neutral-400">
+                    &bull; Added: {{ batch.createdAt }}
+                  </span>
+                </div>
+
+                <div class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    @click.stop="openMatrixForQuestions(currentTask, currentTask.questions.map((qu) => qu.questionText), undefined, 0)"
+                    class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-neutral-700 bg-white hover:bg-neutral-100 border border-neutral-200 cursor-pointer transition-colors"
+                  >
+                    <span>Open Batch Matrix</span>
+                  </button>
+                  <ChevronUp v-if="!expandedBatches[batch.batchLabel]" class="w-4 h-4 text-neutral-500" />
+                  <ChevronDown v-else class="w-4 h-4 text-neutral-500" />
+                </div>
+              </div>
+
+              <!-- Batch Questions Sub-table -->
+              <div v-show="!expandedBatches[batch.batchLabel]" class="overflow-x-auto">
+                <table class="w-full text-left text-xs">
+                  <thead class="bg-neutral-50/40 border-b border-neutral-100 text-[11px] font-semibold text-neutral-500">
+                    <tr>
+                      <th class="p-2.5 w-16 text-center font-mono">全局序號 (#)</th>
+                      <th class="p-2.5">問題標題 / 內容 (Question)</th>
+                      <th class="p-2.5 w-28 text-center">批次內序號 (Batch Q#)</th>
+                      <th class="p-2.5 w-44">目標法域 (Target Jurisdiction)</th>
+                      <th class="p-2.5 w-28 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-neutral-100">
+                    <tr
+                      v-for="(q, qIdx) in currentTask.questions.filter((q) => (q.batchLabel === batch.batchLabel) || (!q.batchLabel && batch.batchNumber === 1))"
+                      :key="q.id"
+                      class="hover:bg-neutral-50/60 transition-colors cursor-pointer"
+                      @click="openMatrixForQuestions(currentTask, currentTask.questions.map((qu) => qu.questionText), undefined, (q.globalIndex ? q.globalIndex - 1 : qIdx))"
+                    >
+                      <td class="p-2.5 text-center font-mono text-neutral-500 font-bold">
+                        {{ (q.globalIndex || qIdx + 1).toString().padStart(2, '0') }}
+                      </td>
+                      <td class="p-2.5 font-medium text-neutral-900">
+                        {{ q.questionText }}
+                      </td>
+                      <td class="p-2.5 text-center">
+                        <span class="inline-flex items-center px-1.5 py-0.5 rounded font-mono font-bold text-[10px] bg-blue-50 text-blue-700 border border-blue-200">
+                          {{ q.batchIndex || qIdx + 1 }}Q
+                        </span>
+                      </td>
+                      <td class="p-2.5">
+                        <div class="flex items-center gap-1 flex-wrap">
+                          <span
+                            v-for="jur in (q.targetJurisdictions || batch.targetJurisdictions)"
+                            :key="jur"
+                            class="px-1.5 py-0.2 rounded text-[10px] font-bold bg-neutral-100 text-neutral-700 border border-neutral-200/80"
+                          >
+                            {{ jur === 'Hong Kong' ? 'HK' : jur === 'Singapore' ? 'SG' : jur === 'United Kingdom' ? 'UK' : jur === 'United States' ? 'US' : jur }}
+                          </span>
+                        </div>
+                      </td>
+                      <td class="p-2.5 text-right" @click.stop>
+                        <button
+                          type="button"
+                          @click="openMatrixForQuestions(currentTask, currentTask.questions.map((qu) => qu.questionText), undefined, (q.globalIndex ? q.globalIndex - 1 : qIdx))"
+                          class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-blue-600 hover:bg-blue-50 border border-blue-200 cursor-pointer transition-colors"
+                        >
+                          <span>View Matrix</span>
+                        </button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1045,7 +1162,7 @@ const handleCreateFromTemplate = (tpl: (typeof starterTemplates)[0]) => {
 
         <button
           @click="emit('openCreateTaskModal')"
-          class="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer self-start sm:self-auto"
+          class="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-all shadow-xs cursor-pointer self-start sm:self-auto"
         >
           <Plus class="w-3.5 h-3.5" />
           <span>Create Task</span>
@@ -1163,7 +1280,7 @@ const handleCreateFromTemplate = (tpl: (typeof starterTemplates)[0]) => {
 
         <button
           @click="emit('openCreateTaskModal')"
-          class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs cursor-pointer transition-all"
+          class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs cursor-pointer transition-all"
         >
           <Plus class="w-4 h-4" />
           <span>Create Your First Task</span>
@@ -1206,7 +1323,7 @@ const handleCreateFromTemplate = (tpl: (typeof starterTemplates)[0]) => {
               <th class="p-3 w-24">Inquiries</th>
               <th class="p-3 w-28">Linked Context</th>
               <th class="p-3 w-32">Last Updated</th>
-              <th class="p-3 w-28 text-right">Actions</th>
+              <th class="p-3 w-28 text-right"></th>
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
@@ -1367,5 +1484,17 @@ const handleCreateFromTemplate = (tpl: (typeof starterTemplates)[0]) => {
         </div>
       </div>
     </Teleport>
+
+    <!-- In-Place Batch Question Input Modal -->
+    <BatchQuestionModal
+      v-if="isBatchModalOpen && currentTask"
+      :isOpen="isBatchModalOpen"
+      :taskId="currentTask.id"
+      :taskTitle="currentTask.title"
+      :existingBatchCount="currentTask.batches?.length || 1"
+      :initialJurisdictions="currentTask.targetJurisdictions"
+      @close="isBatchModalOpen = false"
+      @submit="handleBatchQuestionsSubmit"
+    />
   </div>
 </template>

@@ -18,6 +18,8 @@ import {
   Globe,
   X,
   MoreVertical,
+  UserPlus,
+  UserMinus,
 } from 'lucide-vue-next';
 import type { RegulatorInScope } from '@/types';
 import { ALL_JURISDICTIONS, SECTOR_GROUPS } from '@/types';
@@ -36,6 +38,7 @@ const emit = defineEmits<{
   (e: 'followAllSubScopes', regulatorId: string, targetFollow: boolean): void;
   (e: 'openRegulatorDetail', regulator: RegulatorInScope): void;
   (e: 'createTaskForRegulators', regulators: Array<{ id: string; name: string; acronym?: string; jurisdiction?: string }>): void;
+  (e: 'batchToggleFollow', regulatorIds: string[], targetFollow: boolean): void;
 }>();
 
 const taskStore = useTaskStore();
@@ -99,6 +102,39 @@ const toggleSelect = (id: string) => {
   } else {
     selectedRegulatorIds.value.push(id);
   }
+};
+
+// Selected Regulators computed list
+const selectedRegulatorsList = computed(() => {
+  return props.regulators.filter((r) => selectedRegulatorIds.value.includes(r.id));
+});
+
+// All selected are currently followed (Unfollow tgt)
+const canBatchUnfollow = computed(() => {
+  return (
+    selectedRegulatorsList.value.length > 0 &&
+    selectedRegulatorsList.value.every((r) => r.isFollowed)
+  );
+});
+
+// All selected are currently unfollowed (Follow tgt)
+const canBatchFollow = computed(() => {
+  return (
+    selectedRegulatorsList.value.length > 0 &&
+    selectedRegulatorsList.value.every((r) => !r.isFollowed)
+  );
+});
+
+const handleBatchUnfollow = () => {
+  const ids = [...selectedRegulatorIds.value];
+  emit('batchToggleFollow', ids, false);
+  selectedRegulatorIds.value = [];
+};
+
+const handleBatchFollow = () => {
+  const ids = [...selectedRegulatorIds.value];
+  emit('batchToggleFollow', ids, true);
+  selectedRegulatorIds.value = [];
 };
 
 const handleSort = (field: 'name' | 'jurisdiction' | 'linkage') => {
@@ -290,12 +326,37 @@ const toggleActionMenu = (id: string) => {
         </button>
       </div>
 
-      <!-- Right: Create Task Button -->
-      <div class="flex items-center gap-2.5">
+      <!-- Right: Action Buttons (Batch Unfollow / Follow & Create Task) -->
+      <div class="flex items-center gap-2.5 flex-wrap">
+        <!-- Batch Unfollow: shown ONLY when all selected regulators are followed -->
+        <button
+          v-if="canBatchUnfollow"
+          type="button"
+          @click="handleBatchUnfollow"
+          class="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-neutral-200 bg-white hover:bg-rose-50 hover:text-rose-600 hover:border-rose-300 text-neutral-700 text-xs font-semibold transition-all shadow-2xs cursor-pointer animate-in zoom-in-95"
+          title="Unfollow all selected supervisory authorities"
+        >
+          <UserMinus class="w-3.5 h-3.5 text-neutral-500 hover:text-rose-600" />
+          <span>Unfollow ({{ selectedRegulatorIds.length }} Selected)</span>
+        </button>
+
+        <!-- Batch Follow: shown ONLY when all selected regulators are unfollowed -->
+        <button
+          v-else-if="canBatchFollow"
+          type="button"
+          @click="handleBatchFollow"
+          class="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-neutral-200 bg-white hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 text-neutral-700 text-xs font-semibold transition-all shadow-2xs cursor-pointer animate-in zoom-in-95"
+          title="Follow all selected supervisory authorities"
+        >
+          <UserPlus class="w-3.5 h-3.5 text-neutral-500 hover:text-blue-600" />
+          <span>Follow ({{ selectedRegulatorIds.length }} Selected)</span>
+        </button>
+
+        <!-- Create Task Button -->
         <button
           v-if="selectedRegulatorIds.length > 0"
           @click="handleCreateTaskForSelection"
-          class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer animate-in zoom-in-95"
+          class="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-all shadow-xs cursor-pointer animate-in zoom-in-95"
         >
           <Sparkles class="w-3.5 h-3.5" />
           <span>Create Task ({{ selectedRegulatorIds.length }} Selected)</span>
@@ -304,7 +365,7 @@ const toggleActionMenu = (id: string) => {
         <button
           v-else
           @click="emit('createTaskForRegulators', [])"
-          class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
+          class="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-all shadow-xs cursor-pointer"
         >
           <Plus class="w-3.5 h-3.5" />
           <span>Create Task</span>

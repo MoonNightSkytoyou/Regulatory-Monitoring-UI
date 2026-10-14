@@ -27,12 +27,27 @@ export interface CitationItem {
 
 export interface TaskQuestion {
   id: string;
+  globalIndex?: number;
+  batchIndex?: number; // e.g. 1 for '1Q'
+  batchNumber?: number; // e.g. 1 for 'Batch 1'
+  batchLabel?: string; // e.g. 'Batch 1'
   questionText: string;
+  targetJurisdictions?: string[];
   status: 'Answered' | 'Generating' | 'Pending';
   retrievedUrls: RetrievedUrlItem[];
   llmAnswer: string;
   citations: CitationItem[];
   summary?: string;
+  createdAt?: string;
+}
+
+export interface QuestionBatch {
+  batchNumber: number; // 1, 2, ...
+  batchLabel: string; // 'Batch 1'
+  createdAt: string;
+  targetJurisdictions: string[];
+  questionCount: number;
+  clarificationNotes?: string;
 }
 
 export interface ComplianceTask {
@@ -50,41 +65,67 @@ export interface ComplianceTask {
   updatedAt: string;
   owner: string;
   questions: TaskQuestion[];
+  batches?: QuestionBatch[];
   linkedNewsIds: string[];
   linkedRegulatorIds: string[];
   notes?: string;
 }
 
-const STORAGE_KEY = 'wizpresso_compliance_tasks_v3';
+const STORAGE_KEY = 'wizpresso_compliance_tasks_v6';
 
 const DEFAULT_INITIAL_TASKS: ComplianceTask[] = [
   {
     id: 'task-101',
-    title: 'Operational Resilience & Third-Party Outsourcing Benchmark',
+    title: 'Operational Resilience & Cross-Border Compliance Benchmark',
     topic: 'Operational Resilience & Incident Reporting',
-    jurisdiction: 'Hong Kong ➔ Singapore',
+    jurisdiction: 'Hong Kong ➔ Singapore, UK, US',
     homeJurisdiction: 'Hong Kong',
-    targetJurisdiction: 'Singapore',
-    targetJurisdictions: ['Singapore'],
-    summary: 'Evaluation of mandatory incident response and cloud outsourcing audit rights across HKMA and MAS dual-licensed operations.',
-    consolidatedSummary: `### Consolidated Compliance Summary (Hong Kong ➔ Singapore)
+    targetJurisdiction: 'Singapore, United Kingdom, United States',
+    targetJurisdictions: ['Hong Kong', 'Singapore', 'United Kingdom', 'United States'],
+    summary: 'Multi-jurisdictional evaluation of incident reporting windows, cloud outsourcing audit covenants, and corporate governance oversight.',
+    consolidatedSummary: `### Consolidated Compliance Summary (Hong Kong ➔ Singapore, United Kingdom, United States)
 1. **Incident Notification Discrepancy**:
    Under **HKMA SPM OR-2 §4.2**, authorized institutions must report any critical cyber or operational outage within **2 hours** of assessment. In contrast, **MAS Notice 655 §3.1** requires notification within **1 hour** upon confirming an unscheduled outage exceeding 4 hours cumulative.
 2. **Third-Party & Cloud Audit Rights**:
    Both HKMA and MAS prohibit contracts lacking direct regulatory audit and inspection rights. Standard cloud terms must be supplemented with localized supervisory addendums granting direct on-site access to data centers.
-3. **Action Items**:
-   - Establish a dual-jurisdiction incident notification matrix reflecting the tighter 1-hour MAS window.
+3. **UK FCA & US Federal Frameworks**:
+   UK FCA SYSC 15A & Operational Resilience PS21/3 mandate rigorous mapping of Important Business Services (IBS), whereas US Federal Reserve / OCC Sound Practices impose stringent board-approved recovery time objectives (RTOs).
+4. **Action Items**:
+   - Establish a harmonized multi-jurisdiction incident notification matrix reflecting the tighter 1-hour MAS window.
    - Review ongoing AWS/Azure master agreements for regulator-specific audit and penetration testing clauses.`,
     status: 'Completed',
     createdAt: '2026-09-28 09:30 UTC',
     updatedAt: '2026-10-02 14:15 UTC',
     owner: 'Ivan Choy',
     linkedNewsIds: ['alert-001', 'alert-002', 'dir-hkma-001'],
-    linkedRegulatorIds: ['reg-hkma', 'reg-mas'],
-    notes: 'Supervisory alignment across HKMA SPM OR-2 and MAS Guidelines on Outsourcing.',
+    linkedRegulatorIds: ['reg-hkma', 'reg-mas', 'reg-fca'],
+    notes: 'Supervisory alignment across HKMA SPM OR-2, MAS Guidelines, UK FCA PS21/3, and US Fed/OCC Sound Practices.',
+    batches: [
+      {
+        batchNumber: 1,
+        batchLabel: 'Batch 1',
+        createdAt: '2026-09-28 09:30 UTC',
+        targetJurisdictions: ['Hong Kong', 'Singapore'],
+        questionCount: 4,
+        clarificationNotes: 'Supervisory incident reporting, cloud audit covenants, and operational resilience parameters.',
+      },
+      {
+        batchNumber: 2,
+        batchLabel: 'Batch 2',
+        createdAt: '2026-10-01 15:45 UTC',
+        targetJurisdictions: ['United Kingdom', 'United States'],
+        questionCount: 3,
+        clarificationNotes: 'UK FCA Important Business Services impact tolerances and US Fed/OCC sound practices benchmarks.',
+      },
+    ],
     questions: [
       {
         id: 'q-101-1',
+        globalIndex: 1,
+        batchIndex: 1,
+        batchNumber: 1,
+        batchLabel: 'Batch 1',
+        targetJurisdictions: ['Hong Kong', 'Singapore'],
         questionText: 'What are the mandatory statutory notification timelines for severe cybersecurity or operational disruption incidents?',
         status: 'Answered',
         summary: 'Both HKMA and MAS mandate immediate notification within hours for critical incidents.',
@@ -140,6 +181,11 @@ In comparison, **MAS Notice 655 §3.1** prescribes incident reporting to MAS wit
       },
       {
         id: 'q-101-2',
+        globalIndex: 2,
+        batchIndex: 2,
+        batchNumber: 1,
+        batchLabel: 'Batch 1',
+        targetJurisdictions: ['Hong Kong', 'Singapore'],
         questionText: 'Are financial institutions required to impose audit and inspection rights in third-party cloud service contracts?',
         status: 'Answered',
         summary: 'Direct audit rights, sub-contractor visibility, and supervisory access clauses are non-negotiable requirements.',
@@ -172,6 +218,197 @@ Contractual safeguards must also mandate annual SOC 2 Type II or ISO 27001 third
           },
         ],
       },
+      {
+        id: 'q-101-3',
+        globalIndex: 3,
+        batchIndex: 3,
+        batchNumber: 1,
+        batchLabel: 'Batch 1',
+        targetJurisdictions: ['Hong Kong', 'Singapore'],
+        questionText: 'What scenario testing and tolerance thresholds must be established for critical business services?',
+        status: 'Answered',
+        summary: 'Severe but plausible disruption testing required annually with quantified impact tolerances.',
+        retrievedUrls: [
+          {
+            id: 'url-1',
+            title: 'HKMA Supervisory Policy Manual OR-2: Operational Resilience',
+            url: 'https://www.hkma.gov.hk/eng/regulatory-resources/supervisory-policy-manual/',
+            authority: 'HKMA',
+            jurisdiction: 'Hong Kong',
+            publishDate: '2026-03-24',
+            relevanceTag: 'Mandatory Directive',
+            isBookmarked: true,
+            isFollowed: true,
+            rationale: 'Mandates annual severe-but-plausible scenario simulations across critical operations.',
+            excerpt: 'AIs must conduct scenario testing against severe but plausible scenarios to identify vulnerabilities in their operational resilience framework.',
+            docType: 'Guideline',
+          },
+        ],
+        llmAnswer: `Both HKMA (SPM OR-2 §5.1) and MAS require financial institutions to establish quantified impact tolerance metrics—expressed as maximum acceptable downtime (e.g., 4 hours) or data loss tolerance (RPO = 0 for payment channels).
+
+Institutions must conduct at least annual scenario testing incorporating simultaneous ransomware outbreaks and major third-party cloud unavailability.`,
+        citations: [
+          {
+            pin: 'HKMA SPM OR-2 §5.1',
+            sourceTitle: 'HKMA SPM OR-2 Scenario Testing Requirements',
+            url: 'https://www.hkma.gov.hk/eng/regulatory-resources/supervisory-policy-manual/',
+            clause: 'Section 5.1 Impact Tolerance Setting',
+            excerpt: 'AIs must set tolerance limits that assume disruption will occur, rather than focusing purely on prevention.',
+          },
+        ],
+      },
+      {
+        id: 'q-101-4',
+        globalIndex: 4,
+        batchIndex: 4,
+        batchNumber: 1,
+        batchLabel: 'Batch 1',
+        targetJurisdictions: ['Hong Kong', 'Singapore'],
+        questionText: 'What board-level accountability and governance reporting is mandated for operational resilience posture?',
+        status: 'Answered',
+        summary: 'Board or dedicated executive committee must formally approve tolerance thresholds and self-assessments annually.',
+        retrievedUrls: [
+          {
+            id: 'url-2',
+            title: 'MAS Technology Risk Management (TRM) Guidelines Notice 655',
+            url: 'https://www.mas.gov.sg/regulation/guidelines/technology-risk-management-guidelines',
+            authority: 'MAS',
+            jurisdiction: 'Singapore',
+            publishDate: '2026-02-18',
+            relevanceTag: 'Statutory Notice',
+            isBookmarked: false,
+            isFollowed: true,
+            rationale: 'Specifies board and senior management responsibility for oversight of cyber resilience frameworks.',
+            excerpt: 'The board of directors and senior management are ultimately responsible for the sound governance of technology risk.',
+            docType: 'Circular',
+          },
+        ],
+        llmAnswer: `Under HKMA SPM OR-2 and MAS TRM Guidelines, the Board of Directors retains ultimate fiduciary accountability for operational resilience. Senior management must deliver quarterly operational resilience health scorecards, and the Board must formally sign off on the annual self-assessment report submitted to supervisory authorities.`,
+        citations: [
+          {
+            pin: 'MAS TRM §2.1',
+            sourceTitle: 'MAS Technology Risk Management Oversight Rules',
+            url: 'https://www.mas.gov.sg/regulation/guidelines/technology-risk-management-guidelines',
+            clause: 'Section 2.1 Board and Senior Management Responsibility',
+            excerpt: 'The board of directors and senior management are ultimately responsible for the sound governance of technology risk.',
+          },
+        ],
+      },
+      {
+        id: 'q-101-5',
+        globalIndex: 5,
+        batchIndex: 1,
+        batchNumber: 2,
+        batchLabel: 'Batch 2',
+        targetJurisdictions: ['United Kingdom', 'United States'],
+        questionText: 'How does UK FCA PS21/3 define Important Business Services (IBS) and impact tolerances?',
+        status: 'Answered',
+        summary: 'FCA mandates dual-perspective impact tolerance (harm to consumers and systemic risk) with March 2025/2026 maturity.',
+        retrievedUrls: [
+          {
+            id: 'url-fca-1',
+            title: 'FCA Policy Statement PS21/3: Building Operational Resilience',
+            url: 'https://www.fca.org.uk/publications/policy-statements/ps21-3-building-operational-resilience',
+            authority: 'FCA',
+            jurisdiction: 'United Kingdom',
+            publishDate: '2025-11-10',
+            relevanceTag: 'Policy Statement',
+            isBookmarked: false,
+            isFollowed: true,
+            rationale: 'Mandates identification of Important Business Services whose disruption could cause intolerable harm to consumers.',
+            excerpt: 'Firms must identify their important business services and set impact tolerances for maximum tolerable disruption.',
+            docType: 'Policy Statement',
+          },
+        ],
+        llmAnswer: `Under **UK FCA PS21/3 & PRA SS1/21**, an Important Business Service (IBS) is defined as a service delivered to external end-users that, if disrupted, could cause intolerable level of harm to consumers or pose systemic risk to UK financial stability.
+
+Firms must define precise impact tolerances with quantitative metrics (time, volume, data integrity) and remain within tolerances under severe but plausible scenarios.`,
+        citations: [
+          {
+            pin: 'FCA PS21/3 §2.4',
+            sourceTitle: 'FCA Operational Resilience Framework Rules',
+            url: 'https://www.fca.org.uk/publications/policy-statements/ps21-3-building-operational-resilience',
+            clause: 'Paragraph 2.4 Impact Tolerance Setting',
+            excerpt: 'Firms must set a tolerance that quantifies the maximum acceptable level of disruption, which must not be breached.',
+          },
+        ],
+      },
+      {
+        id: 'q-101-6',
+        globalIndex: 6,
+        batchIndex: 2,
+        batchNumber: 2,
+        batchLabel: 'Batch 2',
+        targetJurisdictions: ['United Kingdom', 'United States'],
+        questionText: 'What core expectations are established under US Federal Reserve and OCC Sound Practices for Operational Resilience?',
+        status: 'Answered',
+        summary: 'Focus on core clearing, settlement, and liquidity operations with 2-hour recovery time objectives for critical operations.',
+        retrievedUrls: [
+          {
+            id: 'url-fed-1',
+            title: 'Federal Reserve / OCC / FDIC Sound Practices to Strengthen Operational Resilience',
+            url: 'https://www.federalreserve.gov/supervisionreg/srletters/sr2024.htm',
+            authority: 'Federal Reserve',
+            jurisdiction: 'United States',
+            publishDate: '2025-08-15',
+            relevanceTag: 'Interagency Paper',
+            isBookmarked: false,
+            isFollowed: true,
+            rationale: 'Establishes interagency sound practices for large domestic and foreign banking organizations in the US.',
+            excerpt: 'Sound Practices §III: For critical operations, firms should establish recovery time objectives that reflect the potential impact on financial stability.',
+            docType: 'Supervisory Paper',
+          },
+        ],
+        llmAnswer: `The **US Federal Reserve, OCC, and FDIC Interagency Paper** on Sound Practices applies to large banking organizations (typically Category I–IV). It mandates that firms maintain operational capabilities to recover from a wide-scale disruption and complete critical clearing, settlement, and payment obligations by the end of the business day, with a 2-hour Recovery Time Objective (RTO) for core financial market utilities.`,
+        citations: [
+          {
+            pin: 'Fed/OCC Sound Practices §3',
+            sourceTitle: 'Interagency Paper on Sound Practices for Operational Resilience',
+            url: 'https://www.federalreserve.gov/supervisionreg/srletters/sr2024.htm',
+            clause: 'Section III Operational Resilience Objectives',
+            excerpt: 'For critical operations, firms should establish recovery time objectives that reflect the potential impact on financial stability.',
+          },
+        ],
+      },
+      {
+        id: 'q-101-7',
+        globalIndex: 7,
+        batchIndex: 3,
+        batchNumber: 2,
+        batchLabel: 'Batch 2',
+        targetJurisdictions: ['United Kingdom', 'United States'],
+        questionText: 'What inter-affiliate service level and operational dependency covenants must cross-border banking groups maintain?',
+        status: 'Answered',
+        summary: 'Arm’s-length service level agreements (SLAs), operational continuity in resolution (OCIR), and ring-fencing compliance.',
+        retrievedUrls: [
+          {
+            id: 'url-pra-1',
+            title: 'PRA Supervisory Statement SS4/21: Outsourcing and Third Party Risk Management',
+            url: 'https://www.bankofengland.co.uk/prudential-regulation/publication/2021/march/outsourcing-and-third-party-risk-management-ss',
+            authority: 'PRA',
+            jurisdiction: 'United Kingdom',
+            publishDate: '2025-06-20',
+            relevanceTag: 'Prudential Standard',
+            isBookmarked: false,
+            isFollowed: false,
+            rationale: 'Governs intragroup outsourcing and operational continuity in resolution.',
+            excerpt: 'Firms must ensure intragroup arrangements are documented with equivalent rigor to third-party arrangements.',
+            docType: 'Supervisory Statement',
+          },
+        ],
+        llmAnswer: `Both UK PRA (SS4/21) and US resolution planning rules (Title I 165(d)) mandate that intragroup service entities (e.g., shared IT service hubs in Hong Kong or Singapore) must operate under formal, arm’s-length Service Level Agreements (SLAs).
+
+These agreements must include bankruptcy-remote resolution clauses ensuring that UK/US operating entities maintain continuous access to critical IT systems even during parental restructuring.`,
+        citations: [
+          {
+            pin: 'PRA SS4/21 §4.8',
+            sourceTitle: 'PRA SS4/21 Intragroup Outsourcing Expectations',
+            url: 'https://www.bankofengland.co.uk/prudential-regulation/publication/2021/march/outsourcing-and-third-party-risk-management-ss',
+            clause: 'Paragraph 4.8 Intragroup Outsourcing Continuity',
+            excerpt: 'Firms must ensure intragroup arrangements are documented with equivalent rigor to third-party arrangements.',
+          },
+        ],
+      },
     ],
   },
   {
@@ -198,9 +435,24 @@ Contractual safeguards must also mandate annual SOC 2 Type II or ISO 27001 third
     linkedNewsIds: ['alert-004'],
     linkedRegulatorIds: ['reg-cr', 'reg-fca'],
     notes: 'Comparison of register of significant controllers cap. 622 vs UK PSC register reforms.',
+    batches: [
+      {
+        batchNumber: 1,
+        batchLabel: 'Batch 1',
+        createdAt: '2026-09-30 11:20 UTC',
+        targetJurisdictions: ['United Kingdom'],
+        questionCount: 1,
+        clarificationNotes: 'Corporate officer structure scrutiny.',
+      },
+    ],
     questions: [
       {
         id: 'q-102-1',
+        globalIndex: 1,
+        batchIndex: 1,
+        batchNumber: 1,
+        batchLabel: 'Batch 1',
+        targetJurisdictions: ['United Kingdom'],
         questionText: 'Can a corporate body serve as sole director or secretary, and what residency requirements apply?',
         status: 'Answered',
         summary: 'Hong Kong requires at least one natural person director; sole director cannot act as secretary.',
@@ -240,11 +492,19 @@ Furthermore, if a body corporate acts as company secretary, its registered offic
 function loadStoredTasks(): ComplianceTask[] {
   if (typeof window === 'undefined') return DEFAULT_INITIAL_TASKS;
   try {
+    // Clear obsolete keys from previous versions
+    ['wizpresso_compliance_tasks_v1', 'wizpresso_compliance_tasks_v2', 'wizpresso_compliance_tasks_v3', 'wizpresso_compliance_tasks_v4', 'wizpresso_compliance_tasks_v5'].forEach((k) => {
+      try { localStorage.removeItem(k); } catch (_) {}
+    });
+
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        const t101 = parsed.find((t: any) => t.id === 'task-101');
+        if (t101 && Array.isArray(t101.questions) && t101.questions.length >= 7) {
+          return parsed;
+        }
       }
     }
   } catch (e) {
@@ -433,16 +693,9 @@ export const useTaskStore = defineStore('taskStore', () => {
     const targetJurStr = targetJurs.join(', ');
     const combinedJur = homeJur === targetJurStr ? homeJur : `${homeJur} ➔ ${targetJurStr}`;
 
-    let questionsList: string[] = (payload.rawQuestions || [])
+    const questionsList: string[] = (payload.rawQuestions || [])
       .map((q) => q.trim())
       .filter(Boolean);
-
-    // If user added no questions, handle cleanly under the hood by attaching a system-default trigger/query
-    if (questionsList.length === 0) {
-      questionsList = [
-        'Conduct routine supervisory compliance monitoring and identify applicable statutory guidelines.',
-      ];
-    }
 
     const getAuthorityForJur = (jur: string) => {
       const j = jur.toLowerCase();
@@ -456,6 +709,15 @@ export const useTaskStore = defineStore('taskStore', () => {
       if (j.includes('hong kong')) return { code: 'HKMA', name: 'Hong Kong Monetary Authority', domain: 'hkma.gov.hk' };
       return { code: `${jur.slice(0, 3).toUpperCase()}-REG`, name: `${jur} Regulatory Authority`, domain: `${jur.toLowerCase().replace(/[^a-z]/g, '')}.gov` };
     };
+
+    const initialBatch: QuestionBatch | undefined = questionsList.length > 0 ? {
+      batchNumber: 1,
+      batchLabel: 'Batch 1',
+      createdAt: nowStr,
+      targetJurisdictions: [...targetJurs],
+      questionCount: questionsList.length,
+      clarificationNotes: payload.summary || '',
+    } : undefined;
 
     const constructedQuestions: TaskQuestion[] = questionsList.map((qText, idx) => {
       const qId = `q-${Date.now()}-${idx + 1}`;
@@ -544,12 +806,18 @@ ${targetJurs
 
       return {
         id: qId,
+        globalIndex: idx + 1,
+        batchIndex: idx + 1,
+        batchNumber: 1,
+        batchLabel: 'Batch 1',
+        targetJurisdictions: [...targetJurs],
         questionText: qText,
         status: 'Answered',
         summary: `Analysis synthesized from ${retrievedUrls.length} authoritative source documents across ${targetJurs.length + 1} jurisdictions.`,
         retrievedUrls,
         llmAnswer,
         citations,
+        createdAt: nowStr,
       };
     });
 
@@ -579,20 +847,152 @@ ${targetJurs
       summary:
         payload.summary ||
         `Compliance assessment evaluating supervisory obligations across ${homeJur} and ${targetJurStr}.`,
-      consolidatedSummary,
-      status: 'Completed',
+      consolidatedSummary: constructedQuestions.length > 0 ? consolidatedSummary : '',
+      status: constructedQuestions.length > 0 ? 'Completed' : 'Draft',
       createdAt: nowStr,
       updatedAt: nowStr,
       owner: 'Ivan Choy',
+      batches: initialBatch ? [initialBatch] : [],
       questions: constructedQuestions,
       linkedNewsIds: payload.linkedNewsIds || [],
       linkedRegulatorIds: payload.linkedRegulatorIds || [],
-      notes: payload.notes || '',
+      notes: payload.notes || payload.summary || '',
     };
 
     tasks.value.unshift(newTask);
     persist();
     return newTask;
+  };
+
+  // Add a new batch of questions to an existing task in-place
+  const addBatchQuestionsToTask = (
+    taskId: string,
+    payload: {
+      questions: string[];
+      targetJurisdictions: string[];
+      clarificationNotes?: string;
+    }
+  ): TaskQuestion[] => {
+    const task = tasks.value.find((t) => t.id === taskId);
+    if (!task) return [];
+
+    const nowStr = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+    if (!task.batches) {
+      task.batches = [];
+    }
+
+    const nextBatchNumber = task.batches.length > 0
+      ? Math.max(...task.batches.map((b) => b.batchNumber)) + 1
+      : 1;
+    const batchLabel = `Batch ${nextBatchNumber}`;
+
+    const targetJurs = payload.targetJurisdictions && payload.targetJurisdictions.length > 0
+      ? payload.targetJurisdictions
+      : task.targetJurisdictions && task.targetJurisdictions.length > 0
+      ? task.targetJurisdictions
+      : ['Hong Kong', 'Singapore'];
+
+    const getAuthorityForJur = (jur: string) => {
+      const j = jur.toLowerCase();
+      if (j.includes('singapore')) return { code: 'MAS', name: 'Monetary Authority of Singapore', domain: 'mas.gov.sg' };
+      if (j.includes('united kingdom') || j.includes('uk')) return { code: 'FCA', name: 'Financial Conduct Authority', domain: 'fca.org.uk' };
+      if (j.includes('european union') || j.includes('eu')) return { code: 'EBA / ESMA', name: 'European Banking Authority', domain: 'eba.europa.eu' };
+      if (j.includes('united states') || j.includes('us')) return { code: 'SEC / CFTC', name: 'US Securities & Exchange Commission', domain: 'sec.gov' };
+      if (j.includes('japan')) return { code: 'JFSA', name: 'Financial Services Agency of Japan', domain: 'fsa.go.jp' };
+      if (j.includes('australia')) return { code: 'APRA / ASIC', name: 'Australian Prudential Regulation Authority', domain: 'apra.gov.au' };
+      if (j.includes('china')) return { code: 'NFRA / CSRC', name: 'National Financial Regulatory Administration', domain: 'nfra.gov.cn' };
+      if (j.includes('hong kong')) return { code: 'HKMA', name: 'Hong Kong Monetary Authority', domain: 'hkma.gov.hk' };
+      return { code: `${jur.slice(0, 3).toUpperCase()}-REG`, name: `${jur} Regulatory Authority`, domain: `${jur.toLowerCase().replace(/[^a-z]/g, '')}.gov` };
+    };
+
+    const currentTotalQuestions = task.questions.length;
+    const newQuestions: TaskQuestion[] = payload.questions.map((qText, idx) => {
+      const qId = `q-${Date.now()}-${idx + 1}`;
+      const globalIndex = currentTotalQuestions + idx + 1;
+      const batchIndex = idx + 1;
+
+      const retrievedUrls: RetrievedUrlItem[] = [];
+      const citations: CitationItem[] = [];
+
+      targetJurs.forEach((tJur, tIdx) => {
+        const auth = getAuthorityForJur(tJur);
+        const urlItem: RetrievedUrlItem = {
+          id: `url-${qId}-${tIdx + 1}`,
+          title: `${auth.code} Statutory Notice & Compliance Guidance (${tJur})`,
+          url: `https://www.${auth.domain}/guidance/batch-${nextBatchNumber}/`,
+          authority: auth.code,
+          jurisdiction: tJur,
+          publishDate: '2026-03-22',
+          relevanceTag: 'Authoritative Official Source',
+          isBookmarked: false,
+          isFollowed: true,
+          rationale: `Directly assesses: "${qText.slice(0, 70)}..." under ${tJur} statutory guidelines.`,
+          excerpt: `Institutions governed by ${auth.code} must maintain ongoing records and observe statutory notification criteria.`,
+          docType: 'Guideline',
+        };
+        retrievedUrls.push(urlItem);
+
+        citations.push({
+          pin: `${auth.code} Directive §${nextBatchNumber}.${idx + 1}`,
+          sourceTitle: `${auth.code} Statutory Directive (${tJur})`,
+          url: urlItem.url,
+          clause: `Section ${nextBatchNumber}.${idx + 1} Operational Criteria`,
+          excerpt: `Licensed entities must ensure compliance controls align with supervisory directives in ${tJur}.`,
+        });
+      });
+
+      const targetJurStr = targetJurs.join(', ');
+      const llmAnswer = `### Batch Inquiry Assessment (${batchLabel} • ${targetJurStr})
+Supervisory synthesis generated for: **${qText}**
+
+1. **Target Legal Baselines (${targetJurStr}):**
+${targetJurs.map((tj) => `   - **${tj}**: Statutory benchmarks mandate robust risk controls, direct supervisory audit access, and proactive disclosure.`).join('\n')}
+
+2. **Compliance Conclusion:**
+   Requirements are currently categorized as conditional/permitted subject to filing and notification requirements under local supervisory rules.`;
+
+      return {
+        id: qId,
+        globalIndex,
+        batchIndex,
+        batchNumber: nextBatchNumber,
+        batchLabel,
+        targetJurisdictions: [...targetJurs],
+        questionText: qText,
+        status: 'Answered',
+        summary: `Synthesized across ${targetJurs.length} target jurisdictions for ${batchLabel}.`,
+        retrievedUrls,
+        llmAnswer,
+        citations,
+        createdAt: nowStr,
+      };
+    });
+
+    task.batches.push({
+      batchNumber: nextBatchNumber,
+      batchLabel,
+      createdAt: nowStr,
+      targetJurisdictions: [...targetJurs],
+      questionCount: newQuestions.length,
+      clarificationNotes: payload.clarificationNotes,
+    });
+
+    task.questions.push(...newQuestions);
+
+    // Merge target jurisdictions into task if new ones were added
+    if (task.targetJurisdictions) {
+      targetJurs.forEach((tj) => {
+        if (!task.targetJurisdictions?.includes(tj)) {
+          task.targetJurisdictions?.push(tj);
+        }
+      });
+      task.targetJurisdiction = task.targetJurisdictions.join(', ');
+      task.jurisdiction = `${task.homeJurisdiction || 'Hong Kong'} ➔ ${task.targetJurisdiction}`;
+    }
+
+    task.updatedAt = nowStr;
+    persist();
+    return newQuestions;
   };
 
   // Toggle URL Bookmark inside a task
@@ -688,6 +1088,7 @@ ${targetJurs
     getRegulatorLinkageCount,
     getTasksForRegulator,
     createTask,
+    addBatchQuestionsToTask,
     linkNewsToTask,
     unlinkNewsFromTask,
     linkRegulatorToTask,

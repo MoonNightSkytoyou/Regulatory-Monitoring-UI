@@ -414,6 +414,7 @@ export interface MatrixCitationItem {
   sourceTitle: string;
   authority: string; // e.g. 'HKMA', 'MAS'
   regulatorAcronym: string;
+  jurisdiction?: string;
   effectiveDate: string;
   sourceUrl: string;
   excerpt: string;
@@ -421,6 +422,9 @@ export interface MatrixCitationItem {
   sha256: string;
   relevanceScore: number;
   relevanceTag?: string; // e.g. 'Mandatory Statutory Condition'
+  confidenceScore?: number;
+  applicabilityRationale?: string;
+  groundingCertainty?: string;
 }
 
 export interface MatrixFollowUpItem {
@@ -467,6 +471,7 @@ export interface MatrixSessionState {
     effectiveDate?: string;
     authority: string;
   };
+  macroSynthesis?: string;
 }
 
 export interface JurisdictionPreset {

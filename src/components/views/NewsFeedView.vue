@@ -789,10 +789,10 @@ const handleCreateTaskForSelection = () => {
                 @click="handleSyncClick"
                 :disabled="isSyncingActive"
                 class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-neutral-200 bg-white hover:bg-neutral-50 active:bg-neutral-100 text-neutral-700 hover:text-neutral-900 text-xs font-semibold transition-all shadow-2xs hover:shadow-xs disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
-                :title="lastUpdatedFormatted ? `Last updated: ${lastUpdatedFormatted}` : 'Click to trigger global feeds sync'"
+                :title="lastUpdatedFormatted ? `Last updated: ${lastUpdatedFormatted}` : 'Click to check updates and trigger global feeds sync'"
               >
                 <RefreshCw :class="`w-4 h-4 text-neutral-600 ${isSyncingActive ? 'animate-spin text-blue-600' : ''}`" />
-                <span>{{ isSyncingActive ? 'Syncing...' : 'Sync Feed' }}</span>
+                <span>{{ isSyncingActive ? 'Syncing...' : 'Check Updates' }}</span>
               </button>
               <span v-if="lastUpdatedText" class="text-[11px] text-neutral-400 hidden sm:inline" :title="lastUpdatedFormatted ? `Last updated: ${lastUpdatedFormatted}` : ''">
                 Last updated: {{ lastUpdatedText }}

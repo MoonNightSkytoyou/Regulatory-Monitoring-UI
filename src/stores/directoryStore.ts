@@ -3,12 +3,13 @@ import { ref } from 'vue';
 import type { RegulatoryDirectoryItem, RegulationItem, PriorityAlert } from '@/types';
 import { GLOBAL_REGULATORY_DIRECTORY } from '@/data/directoryData';
 
-const STORAGE_KEY = 'wizpresso_directory_acknowledged_bookmarks_v6';
+const STORAGE_KEY = 'wizpresso_directory_acknowledged_bookmarks_v7';
 
 function loadInitialBookmarks(): RegulatoryDirectoryItem[] {
   // Clear obsolete localStorage entries from previous versions
   if (typeof window !== 'undefined') {
     try {
+      localStorage.removeItem('wizpresso_directory_acknowledged_bookmarks_v6');
       localStorage.removeItem('wizpresso_directory_acknowledged_bookmarks_v5');
       localStorage.removeItem('wizpresso_directory_acknowledged_bookmarks_v4');
       localStorage.removeItem('wizpresso_directory_acknowledged_bookmarks_v3');
