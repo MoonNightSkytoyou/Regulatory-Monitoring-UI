@@ -1,0 +1,8 @@
+{
+  "name": "Remix Version3 Regulatory Monitoring AI Agent",
+  "description": "Auditable regulatory intelligence and monitoring workspace tailored for compliance, legal, risk, and monitoring professionals.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
